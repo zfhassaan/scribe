@@ -13,6 +13,7 @@ use Knuckles\Scribe\Commands\GenerateDocumentation;
 use Knuckles\Scribe\Exceptions\CouldntGetRouteDetails;
 use Knuckles\Scribe\Extracting\ApiDetails;
 use Knuckles\Scribe\Extracting\Extractor;
+use Knuckles\Scribe\GroupedEndpoints\GroupedEndpointsContract;
 use Knuckles\Scribe\Matching\MatchedRoute;
 use Knuckles\Scribe\Matching\RouteMatcherInterface;
 use Knuckles\Scribe\Tools\ConsoleOutputUtils as c;
@@ -20,6 +21,7 @@ use Knuckles\Scribe\Tools\DocumentationConfig;
 use Knuckles\Scribe\Tools\ErrorHandlingUtils as e;
 use Knuckles\Scribe\Tools\Utils as u;
 use Knuckles\Scribe\Tools\Utils;
+use Mockery\Matcher\Closure;
 use Mpociot\Reflection\DocBlock;
 use Mpociot\Reflection\DocBlock\Tag;
 use ReflectionClass;
@@ -34,10 +36,11 @@ class GroupedEndpointsFromApp implements GroupedEndpointsContract
     public static string $cacheDir;
 
     public function __construct(
-        private GenerateDocumentation $command, private RouteMatcherInterface $routeMatcher,
-        private bool $preserveUserChanges = true, protected string $docsName = 'scribe'
-    )
-    {
+        private GenerateDocumentation $command,
+        private RouteMatcherInterface $routeMatcher,
+        private bool $preserveUserChanges = true,
+        protected string $docsName = 'scribe'
+    ) {
         $this->docConfig = $command->getDocConfig();
 
         static::$camelDir = Camel::camelDir($this->docsName);
@@ -73,11 +76,11 @@ class GroupedEndpointsFromApp implements GroupedEndpointsContract
         $groupedEndpoints = collect($endpoints)->groupBy('metadata.groupName')->map(function (Collection $endpointsInGroup) {
             return [
                 'name' => $endpointsInGroup->first(function (ExtractedEndpointData $endpointData) {
-                        return !empty($endpointData->metadata->groupName);
-                    })->metadata->groupName ?? '',
+                    return !empty($endpointData->metadata->groupName);
+                })->metadata->groupName ?? '',
                 'description' => $endpointsInGroup->first(function (ExtractedEndpointData $endpointData) {
-                        return !empty($endpointData->metadata->groupDescription);
-                    })->metadata->groupDescription ?? '',
+                    return !empty($endpointData->metadata->groupDescription);
+                })->metadata->groupDescription ?? '',
                 'endpoints' => $endpointsInGroup->toArray(),
             ];
         })->all();
@@ -205,7 +208,9 @@ class GroupedEndpointsFromApp implements GroupedEndpointsContract
         $fileNameIndex = 0;
         foreach ($grouped as $group) {
             $yaml = Yaml::dump(
-                $group, 20, 2,
+                $group,
+                20,
+                2,
                 Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE | Yaml::DUMP_OBJECT_AS_MAP | Yaml::DUMP_MULTI_LINE_LITERAL_BLOCK
             );
 
@@ -237,19 +242,20 @@ class GroupedEndpointsFromApp implements GroupedEndpointsContract
 
     private function doesControllerMethodExist(array $routeControllerAndMethod): bool
     {
-       if (count($routeControllerAndMethod) < 2) {
-            throw CouldntGetRouteDetails::new();
+        // If the route is a closure, we can process it
+        if ($routeControllerAndMethod instanceof Closure) {
+            return true;
         }
+
+        // Split the routeControllerAndMethod into class and method
         [$class, $method] = $routeControllerAndMethod;
 
-        if (class_exists($class)) {
-            $reflection = new ReflectionClass($class);
-
-            if ($reflection->hasMethod($method)) {
-                return true;
-            }
+        // Check if both class and method exist
+        if (count($routeControllerAndMethod) < 2 || !class_exists($class) || !method_exists($class, $method)) {
+            return false;
         }
-        return false;
+
+        return true;
     }
 
     private function isRouteHiddenFromDocumentation(array $routeControllerAndMethod): bool
